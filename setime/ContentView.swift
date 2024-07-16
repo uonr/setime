@@ -1,11 +1,25 @@
 import SwiftUI
 import Carbon
 import CoreGraphics
+import Foundation
+import AppKit
+import HotKey
+
 
 struct ContentView: View {
-    @State private var inputSources: [(String, String)] = []
+    @State private var inputSources: [(
+        String,
+        String
+    )] = []
     @State private var inputText = ""
-
+    @State private var orderedInputSourceIdList: [String] = [
+        "com.apple.inputmethod.SCIM.Shuangpin",
+        "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+        "com.apple.keylayout.ABC",
+        "im.rime.inputmethod.Squirrel.Hans"
+    ];
+    @State private var hotKeyList: [HotKey] = []
+    
     var body: some View {
         VStack {
             Image(
@@ -21,26 +35,105 @@ struct ContentView: View {
                 "Input",
                 text: $inputText
             )
-            Button(
-                "Set To Hiragana"
-            ) {
-                let inputSourceIdList = inputSources.map({ $0.1 })
-                let currentInputMode = getCurrentInputMethodId()
-                let currentPosition = inputSourceIdList.firstIndex(of: currentInputMode)
-                print(currentPosition ?? "Unknown current")
-                let targetPosition = inputSourceIdList.firstIndex(of: "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese")
-                print(targetPosition ?? "Unknown target")
-                
-                simulateKeyPress(
-                    spaceCount: 2
-                )
-                print(getCurrentInputMethodId())
+            ForEach(
+                orderedInputSourceIdList,
+                id: \.self
+            ) {id in
+                Button(
+                    "Set To \(id)"
+                ) {
+                    setInputSource(
+                        inputSourceIdList: orderedInputSourceIdList,
+                        targetInputSourceId: id
+                    )
+                }
             }
         }
         .padding()
         .onAppear {inputSources = getInputMethods()
             print(
                 inputSources
+            )
+            let modifiers: NSEvent.ModifierFlags = [
+                .control,
+                .command
+            ]
+            let toAbc = HotKey(
+                key: .h,
+                modifiers: modifiers
+            )
+            let inputSourceIdList = orderedInputSourceIdList
+            toAbc.keyDownHandler = {
+                setInputSource(
+                    inputSourceIdList: inputSourceIdList,
+                    targetInputSourceId: "com.apple.keylayout.ABC"
+                )
+            }
+            hotKeyList.append(
+                toAbc
+            )
+            let toRime = HotKey(
+                key: .j,
+                modifiers: modifiers
+            )
+            toRime.keyDownHandler = {
+                setInputSource(
+                    inputSourceIdList: inputSourceIdList,
+                    targetInputSourceId: "im.rime.inputmethod.Squirrel.Hans"
+                )
+            }
+            hotKeyList.append(
+                toRime
+            )
+            let toHiragana = HotKey(
+                key: .k,
+                modifiers: modifiers
+            )
+            toHiragana.keyDownHandler = {
+                setInputSource(
+                    inputSourceIdList: inputSourceIdList,
+                    targetInputSourceId: "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+                )
+            }
+            hotKeyList.append(
+                toHiragana
+            )
+        }
+    }
+    func setInputSource(
+        inputSourceIdList: [String],
+        targetInputSourceId: String
+    ) {
+        let currentInputMode = getCurrentInputMethodId()
+        guard let currentPosition = inputSourceIdList.firstIndex(
+            of: currentInputMode
+        ) else {
+            print(
+                "Unknown current"
+            )
+            return
+        }
+        guard let targetPosition = inputSourceIdList.firstIndex(
+            of: targetInputSourceId
+        ) else {
+            print(
+                "Unknown target"
+            )
+            return
+        }
+        if (
+            currentPosition == targetPosition
+        ) {
+            return
+        } else if (
+            currentPosition < targetPosition
+        ) {
+            simulateKeyPress(
+                spaceCount: targetPosition - currentPosition
+            )
+        } else {
+            simulateKeyPress(
+                spaceCount: inputSourceIdList.count - currentPosition + targetPosition
             )
         }
     }
@@ -116,7 +209,6 @@ struct ContentView: View {
         } 
         wait()
         
-        // 释放按键
         controlKeyUp?.post(
             tap: .cghidEventTap
         )
@@ -174,7 +266,11 @@ struct ContentView: View {
             else {
                 return nil
             }
-            if !inputSourceID.contains("inputmethod") && !inputSourceID.contains("keylayout")  {
+            if !inputSourceID.contains(
+                "inputmethod"
+            ) && !inputSourceID.contains(
+                "keylayout"
+            )  {
                 return nil
             }
             return (

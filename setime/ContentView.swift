@@ -12,11 +12,30 @@ struct ContentView: View {
         String
     )] = []
     @State private var inputText = ""
-    @State private var orderedInputSourceIdList: [String] = [
-        "com.apple.inputmethod.SCIM.Shuangpin",
-        "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
-        "com.apple.keylayout.ABC",
-        "im.rime.inputmethod.Squirrel.Hans"
+    private var modifiers: NSEvent.ModifierFlags = [
+        .control,
+        .command
+    ]
+    @State private var orderedInputSourceIdList: [(
+        String,
+        Key?
+    )] = [
+        (
+            "com.apple.inputmethod.SCIM.Shuangpin",
+            nil
+        ),
+        (
+            "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+            .k
+        ),
+        (
+            "com.apple.keylayout.ABC",
+            .h
+        ),
+        (
+            "im.rime.inputmethod.Squirrel.Hans",
+            .j
+        ),
     ];
     @State private var hotKeyList: [HotKey] = []
     
@@ -37,13 +56,15 @@ struct ContentView: View {
             )
             ForEach(
                 orderedInputSourceIdList,
-                id: \.self
-            ) {id in
+                id: \.0
+            ) {(
+                id,
+                _
+            ) in
                 Button(
                     "Set To \(id)"
                 ) {
                     setInputSource(
-                        inputSourceIdList: orderedInputSourceIdList,
                         targetInputSourceId: id
                     )
                 }
@@ -52,58 +73,36 @@ struct ContentView: View {
         .padding()
         .onAppear {inputSources = getInputMethods()
             print(
-                inputSources
+                inputSources.map({
+                    $0.1
+                })
             )
-            let modifiers: NSEvent.ModifierFlags = [
-                .control,
-                .command
-            ]
-            let toAbc = HotKey(
-                key: .h,
-                modifiers: modifiers
-            )
-            let inputSourceIdList = orderedInputSourceIdList
-            toAbc.keyDownHandler = {
-                setInputSource(
-                    inputSourceIdList: inputSourceIdList,
-                    targetInputSourceId: "com.apple.keylayout.ABC"
+            hotKeyList = orderedInputSourceIdList.compactMap  {(
+                id,
+                maybeKey
+            ) in
+                guard let key = maybeKey else {
+                    return nil
+                }
+                let hotKey = HotKey(
+                    key: key,
+                    modifiers: modifiers
                 )
+                hotKey.keyDownHandler = {
+                    setInputSource(
+                        targetInputSourceId: id
+                    )
+                }
+                return hotKey
             }
-            hotKeyList.append(
-                toAbc
-            )
-            let toRime = HotKey(
-                key: .j,
-                modifiers: modifiers
-            )
-            toRime.keyDownHandler = {
-                setInputSource(
-                    inputSourceIdList: inputSourceIdList,
-                    targetInputSourceId: "im.rime.inputmethod.Squirrel.Hans"
-                )
-            }
-            hotKeyList.append(
-                toRime
-            )
-            let toHiragana = HotKey(
-                key: .k,
-                modifiers: modifiers
-            )
-            toHiragana.keyDownHandler = {
-                setInputSource(
-                    inputSourceIdList: inputSourceIdList,
-                    targetInputSourceId: "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
-                )
-            }
-            hotKeyList.append(
-                toHiragana
-            )
         }
     }
     func setInputSource(
-        inputSourceIdList: [String],
         targetInputSourceId: String
     ) {
+        let inputSourceIdList = orderedInputSourceIdList.map({
+            $0.0
+        })
         let currentInputMode = getCurrentInputMethodId()
         guard let currentPosition = inputSourceIdList.firstIndex(
             of: currentInputMode

@@ -74,7 +74,7 @@ struct ContentView: View {
         .onAppear {inputSources = getInputMethods()
             print(
                 inputSources.map({
-                    $0.1
+                    ($0.1, nil) as (String, String?)
                 })
             )
             hotKeyList = orderedInputSourceIdList.compactMap  {(

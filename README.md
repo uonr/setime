@@ -1,6 +1,8 @@
-# setime
+# setIME
 
 Select IME by hotkeys.
+
+![Icon](./setime/Assets.xcassets/AppIcon.appiconset/setime_256.png)
 
 ## How to use
 

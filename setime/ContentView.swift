@@ -13,8 +13,8 @@ struct ContentView: View {
     )] = []
     @State private var inputText = ""
     private var modifiers: NSEvent.ModifierFlags = [
-        .control,
-        .command
+        .command,
+        .shift
     ]
     @State private var orderedInputSourceIdList: [(
         String,
@@ -26,11 +26,11 @@ struct ContentView: View {
         ),
         (
             "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
-            .k
+            .d
         ),
         (
             "com.apple.keylayout.ABC",
-            .h
+            .f
         ),
         (
             "im.rime.inputmethod.Squirrel.Hans",

@@ -1,44 +1,45 @@
-import SwiftUI
+import AppKit
 import Carbon
 import CoreGraphics
 import Foundation
-import AppKit
 import HotKey
-
+import SwiftUI
 
 struct ContentView: View {
-    @State private var inputSources: [(
-        String,
-        String
-    )] = []
+    @State private var inputSources:
+        [(
+            String,
+            String
+        )] = []
     @State private var inputText = ""
     private var modifiers: NSEvent.ModifierFlags = [
         .command,
-        .shift
+        .shift,
     ]
-    @State private var orderedInputSourceIdList: [(
-        String,
-        Key?
-    )] = [
-        (
-            "com.apple.inputmethod.SCIM.Shuangpin",
-            nil
-        ),
-        (
-            "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
-            .d
-        ),
-        (
-            "com.apple.keylayout.ABC",
-            .f
-        ),
-        (
-            "im.rime.inputmethod.Squirrel.Hans",
-            .j
-        ),
-    ];
+    @State private var orderedInputSourceIdList:
+        [(
+            String,
+            Key?
+        )] = [
+            (
+                "com.apple.inputmethod.SCIM.Shuangpin",
+                nil
+            ),
+            (
+                "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+                .d
+            ),
+            (
+                "com.apple.keylayout.ABC",
+                .f
+            ),
+            (
+                "im.rime.inputmethod.Squirrel.Hans",
+                .j
+            ),
+        ]
     @State private var hotKeyList: [HotKey] = []
-    
+
     var body: some View {
         VStack {
             Image(
@@ -57,30 +58,42 @@ struct ContentView: View {
             ForEach(
                 orderedInputSourceIdList,
                 id: \.0
-            ) {(
-                id,
-                _
-            ) in
-                Button(
-                    "Set To \(id)"
-                ) {
+            ) {
+                (
+                    id,
+                    _
+                ) in
+                Button(action: {
                     setInputSource(
                         targetInputSourceId: id
                     )
+                }) {
+                    HStack {
+                        Text("Set To")
+                            .foregroundColor(.secondary)
+                            .padding(6)
+                        Spacer()
+                        Text(id)
+                            .padding(6)
+                            .monospaced()
+                    }
                 }
             }
         }
         .padding()
-        .onAppear {inputSources = getInputMethods()
+        .frame(maxWidth: 500)
+        .onAppear {
+            inputSources = getInputMethods()
             print(
                 inputSources.map({
                     ($0.1, nil) as (String, String?)
                 })
             )
-            hotKeyList = orderedInputSourceIdList.compactMap  {(
-                id,
-                maybeKey
-            ) in
+            hotKeyList = orderedInputSourceIdList.compactMap {
+                (
+                    id,
+                    maybeKey
+                ) in
                 guard let key = maybeKey else {
                     return nil
                 }
@@ -104,43 +117,44 @@ struct ContentView: View {
             $0.0
         })
         let currentInputMode = getCurrentInputMethodId()
-        guard let currentPosition = inputSourceIdList.firstIndex(
-            of: currentInputMode
-        ) else {
+        guard
+            let currentPosition = inputSourceIdList.firstIndex(
+                of: currentInputMode
+            )
+        else {
             print(
                 "Unknown current"
             )
             return
         }
-        guard let targetPosition = inputSourceIdList.firstIndex(
-            of: targetInputSourceId
-        ) else {
+        guard
+            let targetPosition = inputSourceIdList.firstIndex(
+                of: targetInputSourceId
+            )
+        else {
             print(
                 "Unknown target"
             )
             return
         }
-        if (
-            currentPosition == targetPosition
-        ) {
+        if currentPosition == targetPosition {
             return
-        } else if (
-            currentPosition < targetPosition
-        ) {
+        } else if currentPosition < targetPosition {
             simulateKeyPress(
                 spaceCount: targetPosition - currentPosition
             )
         } else {
             simulateKeyPress(
-                spaceCount: inputSourceIdList.count - currentPosition + targetPosition
+                spaceCount: inputSourceIdList.count - currentPosition
+                    + targetPosition
             )
         }
     }
-    
+
     func simulateKeyPress(
         spaceCount: Int = 1
     ) {
-        let wait = {() -> Void in
+        let wait = { () -> Void in
             usleep(
                 16000
             )
@@ -148,11 +162,11 @@ struct ContentView: View {
         let source = CGEventSource(
             stateID: .hidSystemState
         )
-        
+
         let optionKeyCode: CGKeyCode = 0x3A
         let controlKeyCode: CGKeyCode = 0x3B
         let spaceKeyCode: CGKeyCode = 0x31
-        
+
         let optionKeyDown = CGEvent(
             keyboardEventSource: source,
             virtualKey: optionKeyCode,
@@ -175,7 +189,7 @@ struct ContentView: View {
         )
         let flags: CGEventFlags = [
             .maskAlternate,
-            .maskControl
+            .maskControl,
         ]
         spaceKeyDown?.flags = flags
         spaceKeyUp?.flags = flags
@@ -189,7 +203,7 @@ struct ContentView: View {
             virtualKey: optionKeyCode,
             keyDown: false
         )
-        
+
         optionKeyDown?.post(
             tap: .cghidEventTap
         )
@@ -200,14 +214,14 @@ struct ContentView: View {
             spaceKeyDown?.post(
                 tap: .cghidEventTap
             )
-            
+
             wait()
             spaceKeyUp?.post(
                 tap: .cghidEventTap
             )
-        } 
+        }
         wait()
-        
+
         controlKeyUp?.post(
             tap: .cghidEventTap
         )
@@ -215,7 +229,7 @@ struct ContentView: View {
             tap: .cghidEventTap
         )
     }
-    
+
     func getCurrentInputMethodId() -> String {
         let kbdType = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
         if let id = TISGetInputSourceProperty(
@@ -228,21 +242,24 @@ struct ContentView: View {
         }
         return "Unknown"
     }
-    
+
     func getInputMethods() -> [(
         String,
         String
     )] {
-        let inputSourceNSArray = TISCreateInputSourceList(
-            nil,
-            false
-        ).takeRetainedValue() as NSArray
+        let inputSourceNSArray =
+            TISCreateInputSourceList(
+                nil,
+                false
+            ).takeRetainedValue() as NSArray
         let inputSources = inputSourceNSArray as! [TISInputSource]
         let filteredInputSources = inputSources.filter({
-            guard let cfType = TISGetInputSourceProperty(
-                $0,
-                kTISPropertyInputSourceIsSelectCapable
-            ) else {
+            guard
+                let cfType = TISGetInputSourceProperty(
+                    $0,
+                    kTISPropertyInputSourceIsSelectCapable
+                )
+            else {
                 return false
             }
             return Unmanaged<AnyObject>.fromOpaque(
@@ -250,26 +267,29 @@ struct ContentView: View {
             ).takeUnretainedValue() as! Bool
         })
         return filteredInputSources.compactMap { source in
-            guard let localizedName = Unmanaged<CFString>.fromOpaque(
-                TISGetInputSourceProperty(
-                    source,
-                    kTISPropertyLocalizedName
-                )
-            ).takeUnretainedValue() as String?,
-                  let inputSourceID = Unmanaged<CFString>.fromOpaque(
+            guard
+                let localizedName = Unmanaged<CFString>.fromOpaque(
+                    TISGetInputSourceProperty(
+                        source,
+                        kTISPropertyLocalizedName
+                    )
+                ).takeUnretainedValue() as String?,
+                let inputSourceID = Unmanaged<CFString>.fromOpaque(
                     TISGetInputSourceProperty(
                         source,
                         kTISPropertyInputSourceID
                     )
-                  ).takeUnretainedValue() as String?
+                ).takeUnretainedValue() as String?
             else {
                 return nil
             }
             if !inputSourceID.contains(
                 "inputmethod"
-            ) && !inputSourceID.contains(
-                "keylayout"
-            )  {
+            )
+                && !inputSourceID.contains(
+                    "keylayout"
+                )
+            {
                 return nil
             }
             return (

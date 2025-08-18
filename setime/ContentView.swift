@@ -12,32 +12,12 @@ struct ContentView: View {
             String
         )] = []
     @State private var inputText = ""
-    private var modifiers: NSEvent.ModifierFlags = [
-        .command,
-        .shift,
-    ]
+    @StateObject private var configManager = ConfigManager.shared
     @State private var orderedInputSourceIdList:
         [(
             String,
             Key?
-        )] = [
-            (
-                "com.apple.inputmethod.SCIM.Shuangpin",
-                nil
-            ),
-            (
-                "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
-                .d
-            ),
-            (
-                "com.apple.keylayout.ABC",
-                .f
-            ),
-            (
-                "im.rime.inputmethod.Squirrel.Hans",
-                .j
-            ),
-        ]
+        )] = []
     @State private var hotKeyList: [HotKey] = []
 
     var body: some View {
@@ -51,34 +31,102 @@ struct ContentView: View {
             .foregroundStyle(
                 .tint
             )
-            TextField(
-                "Input",
-                text: $inputText
-            )
-            ForEach(
-                orderedInputSourceIdList,
-                id: \.0
-            ) {
-                (
-                    id,
-                    _
-                ) in
-                Button(action: {
-                    setInputSource(
-                        targetInputSourceId: id
-                    )
-                }) {
-                    HStack {
-                        Text("Set To")
-                            .foregroundColor(.secondary)
-                            .padding(6)
-                        Spacer()
-                        Text(id)
-                            .padding(6)
-                            .monospaced()
+            
+            // Configuration file information
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Configuration file path:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack {
+                    TextField("", text: .constant(configManager.getConfigFilePath()))
+                        .font(.caption)
+                        .monospaced()
+                        .textFieldStyle(.plain)
+                        .padding(4)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(4)
+                    
+                    Button(action: {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.setString(configManager.getConfigFilePath(), forType: .string)
+                    }) {
+                        Image(systemName: "doc.on.clipboard")
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy path to clipboard")
+                }
+                
+                HStack(spacing: 8) {
+                    Button("Reload Configuration") {
+                        configManager.loadConfiguration()
+                        orderedInputSourceIdList = configManager.getInputMethodList()
+                    }
+                    
+                    Button("Regenerate Configuration") {
+                        configManager.regenerateConfiguration()
+                        orderedInputSourceIdList = configManager.getInputMethodList()
                     }
                 }
+                .font(.caption)
+                .padding(.top, 4)
             }
+            .padding(.vertical, 8)
+            
+            TextField(
+                "Test Input Field",
+                text: $inputText
+            )
+            HStack(spacing: 8) {
+                
+                Text("Due to system limitations, the input method order cannot be obtained. Please manually edit the list below and keep the order consistent with the order in the system tray on the top right.")
+            }
+                
+            List {
+                ForEach(
+                    Array(orderedInputSourceIdList.enumerated()),
+                    id: \.element.0
+                ) { index, element in
+                    let (id, key) = element
+                    
+                    HStack {
+                        // Drag handle icon
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundColor(.secondary)
+                            .padding(.trailing, 8)
+                        
+                        Button(action: {
+                            setInputSource(
+                                targetInputSourceId: id
+                            )
+                        }) {
+                            HStack {
+                                Text("Set To")
+                                    .foregroundColor(.secondary)
+                                    .padding(6)
+                                Spacer()
+                                VStack(alignment: .trailing) {
+                                    Text(configManager.getInputMethodDisplayName(for: id))
+                                        .padding(6)
+                                        .monospaced()
+                                    if let key = key {
+                                        Text("Hotkey: \(configManager.getModifiers().description) + \(key)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                }
+                .onMove(perform: moveInputMethods)
+            }
+            .listStyle(.plain)
+            .frame(height: CGFloat(orderedInputSourceIdList.count * 60 + 20))
         }
         .padding()
         .frame(maxWidth: 500)
@@ -89,6 +137,11 @@ struct ContentView: View {
                     ($0.1, nil) as (String, String?)
                 })
             )
+            // Load input method list from configuration manager
+            orderedInputSourceIdList = configManager.getInputMethodList()
+            // Get configured modifier keys
+            let modifiers = configManager.getModifiers()
+            
             hotKeyList = orderedInputSourceIdList.compactMap {
                 (
                     id,
@@ -108,8 +161,20 @@ struct ContentView: View {
                 }
                 return hotKey
             }
+            
+            // Print configuration file path for user reference
+            print("Configuration file path: \(configManager.getConfigFilePath())")
         }
     }
+    
+    // Drag to reorder input methods
+    func moveInputMethods(from source: IndexSet, to destination: Int) {
+        orderedInputSourceIdList.move(fromOffsets: source, toOffset: destination)
+        
+        // Sync update to configuration manager
+        configManager.updateInputMethodOrder(orderedInputSourceIdList)
+    }
+    
     func setInputSource(
         targetInputSourceId: String
     ) {

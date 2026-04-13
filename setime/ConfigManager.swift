@@ -19,7 +19,7 @@ struct InputMethodConfig: Codable {
 /// Main configuration structure for the application
 struct AppConfig: Codable {
     var inputMethods: [InputMethodConfig]
-    let hotKeyModifiers: [String]
+    var hotKeyModifiers: [String]
     
     enum CodingKeys: String, CodingKey {
         case inputMethods = "input_methods"
@@ -31,6 +31,12 @@ struct AppConfig: Codable {
 
 class ConfigManager: ObservableObject {
     static let shared = ConfigManager()
+    static let availableKeyCodes = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
+    ]
+    static let availableModifierCodes = ["command", "shift", "option", "control"]
     
     @Published var config: AppConfig?
     @Published var configurationErrorMessage: String?
@@ -161,6 +167,18 @@ class ConfigManager: ObservableObject {
             return (inputMethod.id, key)
         }
     }
+
+    /// Get configured key code string for an input method
+    func getInputMethodKeyCode(for id: String) -> String {
+        guard let config = self.config else { return "" }
+        return config.inputMethods.first(where: { $0.id == id })?.keyCode ?? ""
+    }
+
+    /// Get configured modifier key code strings
+    func getHotKeyModifierCodes() -> [String] {
+        guard let config = self.config else { return ["command", "shift"] }
+        return config.hotKeyModifiers
+    }
     
     /// Get hotkey modifier keys
     func getModifiers() -> NSEvent.ModifierFlags {
@@ -267,6 +285,46 @@ class ConfigManager: ObservableObject {
         saveConfiguration()
         
         print("Input method order updated and saved to configuration file")
+    }
+
+    /// Update one input method hotkey and save to configuration file
+    func updateInputMethodHotKey(id: String, keyCode: String?) {
+        guard var config = self.config else { return }
+
+        let normalizedKeyCode = keyCode?.lowercased()
+        let nextKeyCode = normalizedKeyCode.flatMap { key in
+            Self.availableKeyCodes.contains(key) ? key : nil
+        }
+
+        config.inputMethods = config.inputMethods.map { inputMethod in
+            if inputMethod.id == id {
+                return InputMethodConfig(id: inputMethod.id, keyCode: nextKeyCode)
+            }
+
+            if let nextKeyCode, inputMethod.keyCode == nextKeyCode {
+                return InputMethodConfig(id: inputMethod.id, keyCode: nil)
+            }
+
+            return inputMethod
+        }
+
+        self.config = config
+        saveConfiguration()
+    }
+
+    /// Update global hotkey modifiers and save to configuration file
+    func updateHotKeyModifiers(_ modifiers: [String]) {
+        guard var config = self.config else { return }
+
+        let normalizedModifiers = Self.availableModifierCodes.filter { modifier in
+            modifiers.contains(modifier)
+        }
+
+        config.hotKeyModifiers = normalizedModifiers.isEmpty
+            ? ["command", "shift"]
+            : normalizedModifiers
+        self.config = config
+        saveConfiguration()
     }
     
     /// Regenerate configuration file (based on current system input methods)

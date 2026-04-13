@@ -1,8 +1,10 @@
 import AppKit
+import ApplicationServices
 import Carbon
 import CoreGraphics
 import Foundation
 import HotKey
+import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
@@ -19,119 +21,167 @@ struct ContentView: View {
             Key?
         )] = []
     @State private var hotKeyList: [HotKey] = []
+    @State private var showAccessibilityPermissionAlert = false
+    @State private var launchAtLoginEnabled = false
+    @State private var launchAtLoginRequiresApproval = false
+    @State private var launchAtLoginErrorMessage: String?
 
     var body: some View {
-        VStack {
-            Image(
-                systemName: "globe"
-            )
-            .imageScale(
-                .large
-            )
-            .foregroundStyle(
-                .tint
-            )
-            
-            // Configuration file information
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Configuration file path:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "globe")
+                    .imageScale(.large)
+                    .foregroundStyle(.tint)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("setIME")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Assign shortcuts and switch input methods.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Configuration")
+                    .font(.headline)
+
                 HStack {
                     TextField("", text: .constant(configManager.getConfigFilePath()))
                         .font(.caption)
                         .monospaced()
                         .textFieldStyle(.plain)
-                        .padding(4)
+                        .padding(6)
                         .background(Color.gray.opacity(0.1))
-                        .cornerRadius(4)
-                    
-                    Button(action: {
+                        .cornerRadius(6)
+
+                    Button {
                         let pasteboard = NSPasteboard.general
                         pasteboard.clearContents()
                         pasteboard.setString(configManager.getConfigFilePath(), forType: .string)
-                    }) {
+                    } label: {
                         Image(systemName: "doc.on.clipboard")
-                            .foregroundColor(.blue)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .help("Copy path to clipboard")
                 }
-                
+
                 HStack(spacing: 8) {
-                    Button("Reload Configuration") {
+                    Button("Reload") {
                         configManager.loadConfiguration()
-                        orderedInputSourceIdList = configManager.getInputMethodList()
-                        registerHotKeys()
+                        refreshConfiguredInputMethods()
                     }
-                    
-                    Button("Regenerate Configuration") {
+
+                    Button("Regenerate") {
                         configManager.regenerateConfiguration()
-                        orderedInputSourceIdList = configManager.getInputMethodList()
-                        registerHotKeys()
+                        refreshConfiguredInputMethods()
                     }
                 }
-                .font(.caption)
-                .padding(.top, 4)
-            }
-            .padding(.vertical, 8)
-            
-            TextField(
-                "Test Input Field",
-                text: $inputText
-            )
-            HStack(spacing: 8) {
-                
-                Text("Due to system limitations, the input method order cannot be obtained. Please manually edit the list below and keep the order consistent with the order in the system tray on the top right.")
-            }
-                
-            List {
-                ForEach(
-                    Array(orderedInputSourceIdList.enumerated()),
-                    id: \.element.0
-                ) { index, element in
-                    let (id, key) = element
-                    
-                    HStack {
-                        // Drag handle icon
-                        Image(systemName: "line.3.horizontal")
+
+                Toggle("Open at Login", isOn: launchAtLoginBinding())
+
+                if launchAtLoginRequiresApproval {
+                    HStack(spacing: 8) {
+                        Text("Approve setIME in Login Items to finish enabling this.")
+                            .font(.caption)
                             .foregroundColor(.secondary)
-                            .padding(.trailing, 8)
-                        
-                        Button(action: {
-                            setInputSource(
-                                targetInputSourceId: id
-                            )
-                        }) {
-                            HStack {
-                                Text("Set To")
+
+                        Button("Open Login Items") {
+                            openLoginItemsSettings()
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Shortcut Modifiers")
+                    .font(.headline)
+
+                HStack(spacing: 12) {
+                    ForEach(ConfigManager.availableModifierCodes, id: \.self) { modifier in
+                        Toggle(modifierDisplayName(modifier), isOn: modifierBinding(for: modifier))
+                    }
+                }
+
+                Text("At least one modifier is required. Changes are saved immediately.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Test Input")
+                    .font(.headline)
+                TextField("Type here to test the current input method", text: $inputText)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Input Methods")
+                        .font(.headline)
+                    Spacer()
+                    Text("Drag to match the macOS menu order.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                List {
+                    ForEach(
+                        Array(orderedInputSourceIdList.enumerated()),
+                        id: \.element.0
+                    ) { _, element in
+                        let (id, key) = element
+
+                        HStack(spacing: 12) {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundColor(.secondary)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(configManager.getInputMethodDisplayName(for: id))
+                                    .fontWeight(.medium)
+                                Text(verbatim: id)
+                                    .font(.caption)
                                     .foregroundColor(.secondary)
-                                    .padding(6)
-                                Spacer()
-                                VStack(alignment: .trailing) {
-                                    Text(configManager.getInputMethodDisplayName(for: id))
-                                        .padding(6)
-                                        .monospaced()
-                                    if let key = key {
-                                        Text(verbatim: "Hotkey: \(configManager.getModifiers().description) + \(key)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(verbatim: hotKeyDescription(for: id, key: key))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Picker("Shortcut", selection: hotKeyBinding(for: id)) {
+                                Text("None").tag("")
+                                ForEach(ConfigManager.availableKeyCodes, id: \.self) { keyCode in
+                                    Text(keyCode.uppercased()).tag(keyCode)
                                 }
                             }
+                            .labelsHidden()
+                            .frame(width: 96)
+
+                            Button("Switch Now") {
+                                setInputSource(targetInputSourceId: id)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 6)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     }
-                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                    .onMove(perform: moveInputMethods)
                 }
-                .onMove(perform: moveInputMethods)
+                .listStyle(.plain)
+                .frame(minHeight: 220, maxHeight: 380)
             }
-            .listStyle(.plain)
-            .frame(height: CGFloat(orderedInputSourceIdList.count * 60 + 20))
         }
-        .padding()
-        .frame(maxWidth: 500)
+        .padding(18)
+        .frame(minWidth: 640, minHeight: 620)
         .onAppear {
             inputSources = getInputMethods()
             print(
@@ -145,6 +195,9 @@ struct ContentView: View {
             
             // Print configuration file path for user reference
             print("Configuration file path: \(configManager.getConfigFilePath())")
+
+            checkAccessibilityPermission()
+            refreshLaunchAtLoginState()
         }
         .alert(
             "Configuration Error",
@@ -163,6 +216,179 @@ struct ContentView: View {
         } message: {
             Text(configManager.configurationErrorMessage ?? "")
         }
+        .alert("Accessibility Permission Required", isPresented: $showAccessibilityPermissionAlert) {
+            Button("Open System Settings") {
+                requestAccessibilityPermission()
+                openAccessibilitySettings()
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("setIME needs Accessibility permission to send the keyboard events used for switching input methods.")
+        }
+        .alert(
+            "Login Item Error",
+            isPresented: Binding(
+                get: {
+                    launchAtLoginErrorMessage != nil
+                },
+                set: { isPresented in
+                    if !isPresented {
+                        launchAtLoginErrorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(launchAtLoginErrorMessage ?? "")
+        }
+    }
+
+    func launchAtLoginBinding() -> Binding<Bool> {
+        Binding(
+            get: {
+                launchAtLoginEnabled
+            },
+            set: { isEnabled in
+                updateLaunchAtLogin(isEnabled: isEnabled)
+            }
+        )
+    }
+
+    func refreshLaunchAtLoginState() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginEnabled = true
+            launchAtLoginRequiresApproval = false
+        case .requiresApproval:
+            launchAtLoginEnabled = false
+            launchAtLoginRequiresApproval = true
+        default:
+            launchAtLoginEnabled = false
+            launchAtLoginRequiresApproval = false
+        }
+    }
+
+    func updateLaunchAtLogin(isEnabled: Bool) {
+        do {
+            if isEnabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            launchAtLoginErrorMessage = error.localizedDescription
+        }
+
+        refreshLaunchAtLoginState()
+    }
+
+    func openLoginItemsSettings() {
+        guard
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+            )
+        else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+    }
+
+    func checkAccessibilityPermission() {
+        showAccessibilityPermissionAlert = !AXIsProcessTrusted()
+    }
+
+    func requestAccessibilityPermission() {
+        let options = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    func openAccessibilitySettings() {
+        guard
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            )
+        else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+    }
+
+    func refreshConfiguredInputMethods() {
+        orderedInputSourceIdList = configManager.getInputMethodList()
+        registerHotKeys()
+    }
+
+    func hotKeyBinding(for id: String) -> Binding<String> {
+        Binding(
+            get: {
+                configManager.getInputMethodKeyCode(for: id)
+            },
+            set: { keyCode in
+                configManager.updateInputMethodHotKey(
+                    id: id,
+                    keyCode: keyCode.isEmpty ? nil : keyCode
+                )
+                refreshConfiguredInputMethods()
+            }
+        )
+    }
+
+    func modifierBinding(for modifier: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                configManager.getHotKeyModifierCodes().contains(modifier)
+            },
+            set: { isEnabled in
+                var modifiers = configManager.getHotKeyModifierCodes()
+
+                if isEnabled {
+                    if !modifiers.contains(modifier) {
+                        modifiers.append(modifier)
+                    }
+                } else {
+                    guard modifiers.count > 1 else {
+                        return
+                    }
+                    modifiers.removeAll(where: { $0 == modifier })
+                }
+
+                configManager.updateHotKeyModifiers(modifiers)
+                registerHotKeys()
+            }
+        )
+    }
+
+    func modifierDisplayName(_ modifier: String) -> String {
+        switch modifier {
+        case "command":
+            return "Command"
+        case "shift":
+            return "Shift"
+        case "option":
+            return "Option"
+        case "control":
+            return "Control"
+        default:
+            return modifier.capitalized
+        }
+    }
+
+    func hotKeyDescription(for id: String, key: Key?) -> String {
+        guard key != nil else {
+            return "Shortcut: not assigned"
+        }
+
+        let modifiers = configManager.getHotKeyModifierCodes()
+            .map(modifierDisplayName)
+            .joined(separator: " + ")
+        let keyCode = configManager.getInputMethodKeyCode(for: id).uppercased()
+
+        return "Shortcut: \(modifiers) + \(keyCode)"
     }
     
     func registerHotKeys() {

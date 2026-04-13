@@ -33,6 +33,7 @@ class ConfigManager: ObservableObject {
     static let shared = ConfigManager()
     
     @Published var config: AppConfig?
+    @Published var configurationErrorMessage: String?
     private let configFileName = "setime_config.json"
     
     private init() {
@@ -47,6 +48,8 @@ class ConfigManager: ObservableObject {
     
     /// Load configuration file
     func loadConfiguration() {
+        configurationErrorMessage = nil
+
         // First try to load from Documents directory
         if FileManager.default.fileExists(atPath: configFileURL.path) {
             loadConfigFromURL(configFileURL)
@@ -65,7 +68,14 @@ class ConfigManager: ObservableObject {
             print("Configuration loaded successfully from: \(url.path)")
         } catch {
             print("Failed to load configuration: \(error)")
-            createDefaultConfiguration()
+            configurationErrorMessage = """
+            Failed to load configuration file:
+            \(url.path)
+
+            \(error.localizedDescription)
+
+            The existing file was left unchanged.
+            """
         }
     }
     

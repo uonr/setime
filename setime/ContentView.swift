@@ -63,11 +63,13 @@ struct ContentView: View {
                     Button("Reload Configuration") {
                         configManager.loadConfiguration()
                         orderedInputSourceIdList = configManager.getInputMethodList()
+                        registerHotKeys()
                     }
                     
                     Button("Regenerate Configuration") {
                         configManager.regenerateConfiguration()
                         orderedInputSourceIdList = configManager.getInputMethodList()
+                        registerHotKeys()
                     }
                 }
                 .font(.caption)
@@ -112,7 +114,7 @@ struct ContentView: View {
                                         .padding(6)
                                         .monospaced()
                                     if let key = key {
-                                        Text("Hotkey: \(configManager.getModifiers().description) + \(key)")
+                                        Text(verbatim: "Hotkey: \(configManager.getModifiers().description) + \(key)")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
@@ -139,34 +141,56 @@ struct ContentView: View {
             )
             // Load input method list from configuration manager
             orderedInputSourceIdList = configManager.getInputMethodList()
-            // Get configured modifier keys
-            let modifiers = configManager.getModifiers()
-            
-            hotKeyList = orderedInputSourceIdList.compactMap {
-                (
-                    id,
-                    maybeKey
-                ) in
-                guard let key = maybeKey else {
-                    return nil
-                }
-                let hotKey = HotKey(
-                    key: key,
-                    modifiers: modifiers
-                )
-                hotKey.keyDownHandler = {
-                    setInputSource(
-                        targetInputSourceId: id
-                    )
-                }
-                return hotKey
-            }
+            registerHotKeys()
             
             // Print configuration file path for user reference
             print("Configuration file path: \(configManager.getConfigFilePath())")
         }
+        .alert(
+            "Configuration Error",
+            isPresented: Binding(
+                get: {
+                    configManager.configurationErrorMessage != nil
+                },
+                set: { isPresented in
+                    if !isPresented {
+                        configManager.configurationErrorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(configManager.configurationErrorMessage ?? "")
+        }
     }
     
+    func registerHotKeys() {
+        let modifiers = configManager.getModifiers()
+
+        hotKeyList = orderedInputSourceIdList.compactMap {
+            (
+                id,
+                maybeKey
+            ) in
+            guard let key = maybeKey else {
+                return nil
+            }
+            let hotKey = HotKey(
+                key: key,
+                modifiers: modifiers
+            )
+            hotKey.keyDownHandler = {
+                setInputSource(
+                    targetInputSourceId: id
+                )
+            }
+            return hotKey
+        }
+
+        print("Registered \(hotKeyList.count) hotkeys with modifiers: \(modifiers)")
+    }
+
     // Drag to reorder input methods
     func moveInputMethods(from source: IndexSet, to destination: Int) {
         orderedInputSourceIdList.move(fromOffsets: source, toOffset: destination)
@@ -205,14 +229,14 @@ struct ContentView: View {
         if currentPosition == targetPosition {
             return
         } else if currentPosition < targetPosition {
-            simulateKeyPress(
-                spaceCount: targetPosition - currentPosition
-            )
+            let spaceCount = targetPosition - currentPosition
+            print("Switching IME from \(currentInputMode) to \(targetInputSourceId); simulated Ctrl+Option+Space count: \(spaceCount)")
+            simulateKeyPress(spaceCount: spaceCount)
         } else {
-            simulateKeyPress(
-                spaceCount: inputSourceIdList.count - currentPosition
-                    + targetPosition
-            )
+            let spaceCount = inputSourceIdList.count - currentPosition
+                + targetPosition
+            print("Switching IME from \(currentInputMode) to \(targetInputSourceId); simulated Ctrl+Option+Space count: \(spaceCount)")
+            simulateKeyPress(spaceCount: spaceCount)
         }
     }
 

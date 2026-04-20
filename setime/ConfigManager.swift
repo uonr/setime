@@ -20,10 +20,12 @@ struct InputMethodConfig: Codable {
 struct AppConfig: Codable {
     var inputMethods: [InputMethodConfig]
     var hotKeyModifiers: [String]
+    var modifierOnlyDelay: Double?
     
     enum CodingKeys: String, CodingKey {
         case inputMethods = "input_methods"
         case hotKeyModifiers = "hotkey_modifiers"
+        case modifierOnlyDelay = "modifier_only_delay"
     }
 }
 
@@ -37,6 +39,7 @@ class ConfigManager: ObservableObject {
         "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
     ]
     static let availableModifierCodes = ["command", "shift", "option", "control"]
+    static let defaultModifierOnlyDelay = 0.12
     
     @Published var config: AppConfig?
     @Published var configurationErrorMessage: String?
@@ -102,7 +105,8 @@ class ConfigManager: ObservableObject {
         
         let defaultConfig = AppConfig(
             inputMethods: inputMethodConfigs,
-            hotKeyModifiers: ["command", "shift"]
+            hotKeyModifiers: ["command", "shift"],
+            modifierOnlyDelay: Self.defaultModifierOnlyDelay
         )
         
         self.config = defaultConfig
@@ -168,16 +172,32 @@ class ConfigManager: ObservableObject {
         }
     }
 
-    /// Get configured key code string for an input method
-    func getInputMethodKeyCode(for id: String) -> String {
-        guard let config = self.config else { return "" }
-        return config.inputMethods.first(where: { $0.id == id })?.keyCode ?? ""
+    /// Get configured key code string for an input method.
+    /// nil means disabled; an empty string means modifier-only.
+    func getInputMethodKeyCode(for id: String) -> String? {
+        guard let config = self.config else { return nil }
+        return config.inputMethods.first(where: { $0.id == id })?.keyCode ?? nil
+    }
+
+    /// Get the input method assigned to the modifier-only shortcut, if any.
+    func getModifierOnlyInputMethodId() -> String? {
+        guard let config = self.config else { return nil }
+        return config.inputMethods.first(where: { $0.keyCode == "" })?.id
     }
 
     /// Get configured modifier key code strings
     func getHotKeyModifierCodes() -> [String] {
         guard let config = self.config else { return ["command", "shift"] }
         return config.hotKeyModifiers
+    }
+
+    /// Get the delay before a modifier-only shortcut fires.
+    func getModifierOnlyDelay() -> TimeInterval {
+        guard let delay = config?.modifierOnlyDelay else {
+            return Self.defaultModifierOnlyDelay
+        }
+
+        return Self.normalizedModifierOnlyDelay(delay)
     }
     
     /// Get hotkey modifier keys
@@ -292,8 +312,13 @@ class ConfigManager: ObservableObject {
         guard var config = self.config else { return }
 
         let normalizedKeyCode = keyCode?.lowercased()
-        let nextKeyCode = normalizedKeyCode.flatMap { key in
-            Self.availableKeyCodes.contains(key) ? key : nil
+        let nextKeyCode: String?
+        if normalizedKeyCode == "" {
+            nextKeyCode = ""
+        } else {
+            nextKeyCode = normalizedKeyCode.flatMap { key in
+                Self.availableKeyCodes.contains(key) ? key : nil
+            }
         }
 
         config.inputMethods = config.inputMethods.map { inputMethod in
@@ -326,6 +351,19 @@ class ConfigManager: ObservableObject {
         self.config = config
         saveConfiguration()
     }
+
+    /// Update modifier-only shortcut delay and save to configuration file.
+    func updateModifierOnlyDelay(_ delay: Double) {
+        guard var config = self.config else { return }
+
+        config.modifierOnlyDelay = Self.normalizedModifierOnlyDelay(delay)
+        self.config = config
+        saveConfiguration()
+    }
+
+    private static func normalizedModifierOnlyDelay(_ delay: Double) -> Double {
+        min(max(delay, 0), 2)
+    }
     
     /// Regenerate configuration file (based on current system input methods)
     func regenerateConfiguration() {
@@ -350,7 +388,8 @@ class ConfigManager: ObservableObject {
         
         let newConfig = AppConfig(
             inputMethods: inputMethodConfigs,
-            hotKeyModifiers: config?.hotKeyModifiers ?? ["command", "shift"]
+            hotKeyModifiers: config?.hotKeyModifiers ?? ["command", "shift"],
+            modifierOnlyDelay: config?.modifierOnlyDelay ?? Self.defaultModifierOnlyDelay
         )
         
         self.config = newConfig

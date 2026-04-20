@@ -8,6 +8,17 @@ import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
+    private static let disabledShortcutValue = "__disabled__"
+    private static let delayFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.minimum = 0
+        formatter.maximum = 2
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 3
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+
     @State private var inputSources:
         [(
             String,
@@ -21,6 +32,11 @@ struct ContentView: View {
             Key?
         )] = []
     @State private var hotKeyList: [HotKey] = []
+    @State private var localModifierOnlyMonitor: Any?
+    @State private var globalModifierOnlyMonitor: Any?
+    @State private var modifierOnlyShortcutIsPressed = false
+    @State private var pendingModifierOnlyShortcut: DispatchWorkItem?
+    @State private var suppressModifierOnlyUntilRelease = false
     @State private var showAccessibilityPermissionAlert = false
     @State private var launchAtLoginEnabled = false
     @State private var launchAtLoginRequiresApproval = false
@@ -109,6 +125,18 @@ struct ContentView: View {
                     }
                 }
 
+                HStack(spacing: 8) {
+                    Text("None delay")
+                    TextField(
+                        "0.12",
+                        value: modifierOnlyDelayBinding(),
+                        formatter: Self.delayFormatter
+                    )
+                    .frame(width: 72)
+                    Text("seconds")
+                        .foregroundColor(.secondary)
+                }
+
                 Text("At least one modifier is required. Changes are saved immediately.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -137,7 +165,7 @@ struct ContentView: View {
                         Array(orderedInputSourceIdList.enumerated()),
                         id: \.element.0
                     ) { _, element in
-                        let (id, key) = element
+                        let (id, _) = element
 
                         HStack(spacing: 12) {
                             Image(systemName: "line.3.horizontal")
@@ -151,7 +179,7 @@ struct ContentView: View {
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
-                                Text(verbatim: hotKeyDescription(for: id, key: key))
+                                Text(verbatim: hotKeyDescription(for: id))
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -159,13 +187,14 @@ struct ContentView: View {
                             Spacer()
 
                             Picker("Shortcut", selection: hotKeyBinding(for: id)) {
+                                Text("Disable").tag(Self.disabledShortcutValue)
                                 Text("None").tag("")
                                 ForEach(ConfigManager.availableKeyCodes, id: \.self) { keyCode in
                                     Text(keyCode.uppercased()).tag(keyCode)
                                 }
                             }
                             .labelsHidden()
-                            .frame(width: 96)
+                            .frame(width: 112)
 
                             Button("Switch Now") {
                                 setInputSource(targetInputSourceId: id)
@@ -198,6 +227,9 @@ struct ContentView: View {
 
             checkAccessibilityPermission()
             refreshLaunchAtLoginState()
+        }
+        .onDisappear {
+            stopModifierOnlyMonitor()
         }
         .alert(
             "Configuration Error",
@@ -326,12 +358,12 @@ struct ContentView: View {
     func hotKeyBinding(for id: String) -> Binding<String> {
         Binding(
             get: {
-                configManager.getInputMethodKeyCode(for: id)
+                configManager.getInputMethodKeyCode(for: id) ?? Self.disabledShortcutValue
             },
             set: { keyCode in
                 configManager.updateInputMethodHotKey(
                     id: id,
-                    keyCode: keyCode.isEmpty ? nil : keyCode
+                    keyCode: keyCode == Self.disabledShortcutValue ? nil : keyCode
                 )
                 refreshConfiguredInputMethods()
             }
@@ -363,6 +395,17 @@ struct ContentView: View {
         )
     }
 
+    func modifierOnlyDelayBinding() -> Binding<Double> {
+        Binding(
+            get: {
+                configManager.getModifierOnlyDelay()
+            },
+            set: { delay in
+                configManager.updateModifierOnlyDelay(delay)
+            }
+        )
+    }
+
     func modifierDisplayName(_ modifier: String) -> String {
         switch modifier {
         case "command":
@@ -378,21 +421,24 @@ struct ContentView: View {
         }
     }
 
-    func hotKeyDescription(for id: String, key: Key?) -> String {
-        guard key != nil else {
-            return "Shortcut: not assigned"
-        }
-
+    func hotKeyDescription(for id: String) -> String {
         let modifiers = configManager.getHotKeyModifierCodes()
             .map(modifierDisplayName)
             .joined(separator: " + ")
-        let keyCode = configManager.getInputMethodKeyCode(for: id).uppercased()
+        guard let keyCode = configManager.getInputMethodKeyCode(for: id) else {
+            return "Shortcut: Disable"
+        }
 
-        return "Shortcut: \(modifiers) + \(keyCode)"
+        guard !keyCode.isEmpty else {
+            return "Shortcut: \(modifiers)"
+        }
+
+        return "Shortcut: \(modifiers) + \(keyCode.uppercased())"
     }
     
     func registerHotKeys() {
         let modifiers = configManager.getModifiers()
+        stopModifierOnlyMonitor()
 
         hotKeyList = orderedInputSourceIdList.compactMap {
             (
@@ -407,6 +453,8 @@ struct ContentView: View {
                 modifiers: modifiers
             )
             hotKey.keyDownHandler = {
+                cancelPendingModifierOnlyShortcut()
+                suppressModifierOnlyUntilRelease = true
                 setInputSource(
                     targetInputSourceId: id
                 )
@@ -414,7 +462,102 @@ struct ContentView: View {
             return hotKey
         }
 
+        registerModifierOnlyMonitor()
+
         print("Registered \(hotKeyList.count) hotkeys with modifiers: \(modifiers)")
+    }
+
+    func registerModifierOnlyMonitor() {
+        guard configManager.getModifierOnlyInputMethodId() != nil else {
+            modifierOnlyShortcutIsPressed = false
+            suppressModifierOnlyUntilRelease = false
+            cancelPendingModifierOnlyShortcut()
+            return
+        }
+
+        let mask: NSEvent.EventTypeMask = .flagsChanged
+        localModifierOnlyMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { event in
+            handleModifierOnlyEvent(event)
+            return event
+        }
+        globalModifierOnlyMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { event in
+            DispatchQueue.main.async {
+                handleModifierOnlyEvent(event)
+            }
+        }
+    }
+
+    func stopModifierOnlyMonitor() {
+        cancelPendingModifierOnlyShortcut()
+
+        if let localModifierOnlyMonitor {
+            NSEvent.removeMonitor(localModifierOnlyMonitor)
+            self.localModifierOnlyMonitor = nil
+        }
+
+        if let globalModifierOnlyMonitor {
+            NSEvent.removeMonitor(globalModifierOnlyMonitor)
+            self.globalModifierOnlyMonitor = nil
+        }
+    }
+
+    func handleModifierOnlyEvent(_ event: NSEvent) {
+        let activeModifiers = event.modifierFlags.intersection(shortcutModifierMask())
+        let expectedModifiers = configManager.getModifiers().intersection(shortcutModifierMask())
+
+        if suppressModifierOnlyUntilRelease {
+            if activeModifiers.isSuperset(of: expectedModifiers) {
+                return
+            }
+
+            suppressModifierOnlyUntilRelease = false
+            modifierOnlyShortcutIsPressed = false
+        }
+
+        let isPressed = activeModifiers == expectedModifiers
+
+        guard isPressed != modifierOnlyShortcutIsPressed else {
+            return
+        }
+
+        modifierOnlyShortcutIsPressed = isPressed
+
+        guard isPressed else {
+            return
+        }
+
+        scheduleModifierOnlyShortcut()
+    }
+
+    func scheduleModifierOnlyShortcut() {
+        cancelPendingModifierOnlyShortcut()
+
+        let workItem = DispatchWorkItem {
+            triggerModifierOnlyShortcut()
+        }
+        pendingModifierOnlyShortcut = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + configManager.getModifierOnlyDelay(),
+            execute: workItem
+        )
+    }
+
+    func cancelPendingModifierOnlyShortcut() {
+        pendingModifierOnlyShortcut?.cancel()
+        pendingModifierOnlyShortcut = nil
+    }
+
+    func triggerModifierOnlyShortcut() {
+        guard let targetInputSourceId = configManager.getModifierOnlyInputMethodId() else {
+            return
+        }
+
+        suppressModifierOnlyUntilRelease = true
+        setInputSource(targetInputSourceId: targetInputSourceId)
+    }
+
+    func shortcutModifierMask() -> NSEvent.ModifierFlags {
+        [.command, .shift, .option, .control]
     }
 
     // Drag to reorder input methods
